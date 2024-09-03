@@ -1,0 +1,75 @@
+name: build
+
+on:
+#  release:
+#    types: [published]
+  push:
+    branches:
+      - master
+#    paths:
+#      - '.config'
+#  schedule:
+#    - cron: 0 8 * * 5
+
+    
+env:
+  ROM_URL: https://cdn.okcaros.com/rom/lemonadep/TQ3A.240403.001/stable/okcar_os-TQ3A.240403.001-lemonadep-stable-1712515668-rom.zip
+  ROM_NAME: Generic
+  BUILD_TYPE: ab
+  TZ: Asia/Shanghai
+
+jobs:
+  build:
+    runs-on: ubuntu-20.04
+    if: github.event.repository.owner.id == github.event.sender.id
+
+    steps:
+       - name: Checkout
+         uses: actions/checkout@master
+           
+       - name: Initialization environment
+         run: |
+              sudo apt install git
+              echo "BUILD_TIME=$(date +%s | md5sum | awk '{print substr($1,1,10)}')" >> $GITHUB_ENV
+           
+       - name: Clone ErfanGSI Source Code
+         run: git clone --recurse-submodules https://github.com/yestudio2018/ErfanGSIs.git ErfanGSIs
+         
+       - name: Fix exit
+         run: |
+              sed -i 's/\|\| exit 1//g' $GITHUB_WORKSPACE/ErfanGSIs/url2GSI.sh
+              sed -i 's/exit 1//g' $GITHUB_WORKSPACE/ErfanGSIs/url2GSI.sh
+       
+       - name: Setting up ErfanGSI requirements
+         run: |
+              cd $GITHUB_WORKSPACE/ErfanGSIs
+              mkdir ./output
+              sudo bash ./setup.sh
+              java -version
+              pip3 install aligo
+              
+       - name: Download Stock Rom & Generate GSI
+         run: |
+             cd $GITHUB_WORKSPACE/ErfanGSIs
+             sudo bash ./url2GSI.sh -c --$BUILD_TYPE $ROM_URL $ROM_NAME
+       
+       - name: Zip GSI  
+         run: |
+              cd $GITHUB_WORKSPACE/ErfanGSIs/output
+              zip -r GSI.zip ./*
+              mkdir upload
+              if [[ $(du -sb "GSI.zip" | awk '{print $1}') -gt 2097152000 ]];then
+                  echo -e "split packaging..."
+                  tar -cpzf - "GSI.zip" | split -d -b 1024m - "upload/GSI.zip"
+              else 
+                  mv GSI.zip upload/
+              fi
+              ls "upload"                  
+              
+       - name: Upload GSI to release
+         uses: ncipollo/release-action@v1.8.6
+         with:
+           artifacts: ${{ github.workspace }}/ErfanGSIs/output/upload/*
+           tag: ErfanGSIs-${{ env.ROM_NAME }}-${{ env.BUILD_TYPE }}-${{ env.BUILD_TIME }}
+           bodyFile: "${{ github.workspace }}/ErfanGSIs/output/info.txt"
+           token: ${{ secrets.PAT }}
